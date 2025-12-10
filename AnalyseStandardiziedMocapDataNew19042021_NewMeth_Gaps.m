@@ -82,7 +82,7 @@ warning('off', 'MATLAB:colon:nonIntegerIndex');
 warning('off', 'MATLAB:colon:nonScalarOperands');
 
 % Base dataset folder
-baseFolder = 'C:\Users\ac4jmi\Desktop\DMO4LNC\Data Collection\Dataset';
+baseFolder = 'C:\Users\ac4jmi\Desktop\DMO4LNC\dmo4lnc-analysis\Dataset';
 
 % Get all cohort folders (e.g., 'HA', 'HB', etc.)
 cohortDirs = dir(baseFolder);
