@@ -89,6 +89,9 @@ cohortDirs = dir(baseFolder);
 isCohort = [cohortDirs.isdir] & ~ismember({cohortDirs.name}, {'.', '..'});
 cohortDirs = cohortDirs(isCohort);
 
+% List of subjects to skip due to errors etc.
+skipList = ['969'];
+
 for c = 1:length(cohortDirs)
     cohort = cohortDirs(c).name;
     cohortPath = fullfile(baseFolder, cohort);
@@ -100,6 +103,11 @@ for c = 1:length(cohortDirs)
 
     for s = 1:length(sbjDirs)
         sbjNow = sbjDirs(s).name
+        % skip subject if in skip list
+        if ismember(sbjNow, skipList)
+            fprintf('Value %s is in the skip list. Skipping...\n', sbjNow);
+            continue;
+        end
         folder = fullfile(cohortPath, sbjNow, 'Lab\Laboratory');
 
         % Get all .mat files in the Laboratory folder
