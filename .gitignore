@@ -209,6 +209,7 @@ __marimo__/
 
 # Project Specific
 Dataset/
+HA_vs_CP/
 output/
 .csv
 .cwa
