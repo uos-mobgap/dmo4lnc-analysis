@@ -211,6 +211,7 @@ __marimo__/
 Dataset/
 HA_vs_CP/
 output/
+GI-HAR/
 .csv
 .cwa
 .pdf
