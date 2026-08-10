@@ -1021,7 +1021,7 @@ def last_non_nan(main_list):
     return None
 
 
-def match_closest_unique(mocap, mobgap, threshold=50):
+def match_closest_unique(mocap, mobgap, threshold=50, prints = False):
     # first map each ic in mobgap to the closest one in mocap
     reduced_mobgap = [None for x in mocap]
     mobgap_dists = [None for x in mocap]
@@ -1088,7 +1088,8 @@ def match_closest_unique(mocap, mobgap, threshold=50):
 
     mask = [False if x == None else True for x in reduced_mobgap][1:-1]
     # print(mask)
-    print(metrics)
+    if prints:
+        print(metrics)
     return reduced_mobgap, mask, mobgap_mask, mocap_mask, metrics
 
 
