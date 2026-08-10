@@ -1004,7 +1004,7 @@ def process_mocap_output(mc_root, parameter):
 
 def get_closest_index(time_arr, time_to_become_index):
     index = min(time_arr, key=lambda x: abs(x - (time_to_become_index + time_arr[0])))
-    return mocap_timestamp.index(index)
+    return time_arr.index(index)
 
 
 def first_non_nan(main_list):
