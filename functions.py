@@ -1215,6 +1215,17 @@ def assess_pipeline(dataset, pipeline, cohorts, subjects_to_ignore, all_tests, p
                 cur_sub_metrics["file_name"] = cur_file_name
                 cur_sub_metrics[["wb_TPs", "wb_FPs", "wb_FNs", "wb_TNs", "mobgap_ICs", "mocap_ICs", "IC_TPs", "IC_FPs", "IC_FNs"]] = 0
 
+                # helper function to safely extract mobgap parameters regardless of index type or length
+                def get_mobgap_param(df, col, wb_idx):
+                    if df is None or df.empty or col not in df.columns:
+                        return np.nan
+                    if wb_idx in df.index:
+                        val = df.loc[wb_idx, col]
+                    elif isinstance(wb_idx, int) and wb_idx < len(df):
+                        val = df[col].iloc[wb_idx]
+                    else:
+                        return np.nan
+                    return val.item() if hasattr(val, "item") and not hasattr(val, "__len__") else val
 
                 if test_to_compare in ["Test1"]:
                     # if there are walking bouts detected in standing, we have false positives, else true negatives
@@ -1249,19 +1260,18 @@ def assess_pipeline(dataset, pipeline, cohorts, subjects_to_ignore, all_tests, p
 
                         # get the DMOs for the current trial
                         cur_sub_metrics["stride_length_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["AverageStrideLength"]
-                        cur_sub_metrics["stride_length_mobgap"] = pipeline.per_wb_parameters_["stride_length_m"].values
                         cur_sub_metrics["cadence_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["AverageCadence"]
-                        cur_sub_metrics["cadence_mobgap"] = pipeline.per_wb_parameters_["cadence_spm"].values
                         cur_sub_metrics["walking_speed_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["AverageSpeed"]
-                        cur_sub_metrics["walking_speed_mobgap"] = pipeline.per_wb_parameters_["walking_speed_mps"].values
+                        cur_sub_metrics["stride_length_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_,"stride_length_m", 0)
+                        cur_sub_metrics["cadence_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "cadence_spm",0)
+                        cur_sub_metrics["walking_speed_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_,"walking_speed_mps", 0)
 
                         cur_sub_metrics["wb_start_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["Start"]
-                        cur_sub_metrics["wb_start_mobgap"] = pipeline.per_wb_parameters_["start"].values/100
                         cur_sub_metrics["wb_end_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["End"]
-                        cur_sub_metrics["wb_end_mobgap"] = pipeline.per_wb_parameters_["end"].values/100
                         cur_sub_metrics["wb_duration_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["Duration"]
-                        cur_sub_metrics["wb_duration_mobgap"] = pipeline.per_wb_parameters_["duration_s"].values
-
+                        cur_sub_metrics["wb_start_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "start",0) / 100
+                        cur_sub_metrics["wb_end_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "end", 0) / 100
+                        cur_sub_metrics["wb_duration_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_,"duration_s", 0)
 
                         cur_sub_metrics = cur_sub_metrics.infer_objects() # automatically get dtypes
                         all_metrics = pd.concat([all_metrics, cur_sub_metrics.to_frame().T], ignore_index=True)
@@ -1296,17 +1306,6 @@ def assess_pipeline(dataset, pipeline, cohorts, subjects_to_ignore, all_tests, p
                                     cur_sub_metrics[k] = v
 
                                 # get the DMOs for the current wb
-                                # helper function to safely extract mobgap parameters regardless of index type or length
-                                def get_mobgap_param(df, col, wb_idx):
-                                    if df is None or df.empty or col not in df.columns:
-                                        return np.nan
-                                    if wb_idx in df.index:
-                                        val = df.loc[wb_idx, col]
-                                    elif isinstance(wb_idx, int) and wb_idx < len(df):
-                                        val = df[col].iloc[wb_idx]
-                                    else:
-                                        return np.nan
-                                    return val.item() if hasattr(val, "item") and not hasattr(val, "__len__") else val
 
                                 cur_sub_metrics["stride_length_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["AverageStrideLength"]
                                 cur_sub_metrics["cadence_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["AverageCadence"]
@@ -1342,17 +1341,23 @@ def assess_pipeline(dataset, pipeline, cohorts, subjects_to_ignore, all_tests, p
                             cur_sub_metrics = cur_sub_metrics.infer_objects() # automatically get dtypes
                             all_metrics = pd.concat([all_metrics, cur_sub_metrics.to_frame().T], ignore_index=True)
 
-    # convert NAN columns to floats
-    cols_with_nan = [c for c in all_metrics.columns if all_metrics[c].isna().any()]
+        # convert NAN columns to floats
+        cols_with_nan = [c for c in all_metrics.columns if all_metrics[c].isna().any()]
 
-    # convert lists to single values
-    all_metrics[cols_with_nan] = all_metrics[cols_with_nan].map(
-        lambda x: x[0] if isinstance(x, list) and len(x) > 0 else (np.nan if isinstance(x, list) else x)
-    )
+        def to_scalar(val):
+            if isinstance(val, (np.ndarray, list, tuple)):
+                arr = np.asarray(val)
+                if arr.size == 0:
+                    return np.nan
+                return arr.flat[0]
+            return val
 
-    all_metrics[cols_with_nan] = all_metrics[cols_with_nan].astype(float)
+        all_metrics[cols_with_nan] = all_metrics[cols_with_nan].map(
+            lambda col: col.map(to_scalar) if hasattr(col, "map") else to_scalar(col)
+        )
 
-    # format to 1dp and print
+        all_metrics[cols_with_nan] = all_metrics[cols_with_nan].astype(float)
+
     pd.options.display.float_format = lambda x: f"{x:.1f}"
 
     return all_metrics
