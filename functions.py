@@ -13,6 +13,7 @@ import shutil
 import seaborn as sns
 import stumpy
 import matplotlib.pyplot as plt
+import matplotlib
 
 from mobgap.data import GenericMobilisedDataset
 
@@ -1144,3 +1145,214 @@ def plot_subject_wbs(test, mocap_event_indices, mobgap_event_indices):
 
     plt.tight_layout()
     plt.show()
+
+def assess_pipeline(dataset, pipeline, cohorts, subjects_to_ignore, all_tests, prints = False, plots = False):
+
+    all_metrics = pd.DataFrame(columns=["cohort", "subject", "file_name", "wb_ID", "wb_TPs", "wb_FPs", "wb_FNs", "wb_TNs", "mobgap_ICs", "mocap_ICs",
+                                    "IC_TPs", "IC_FPs", "IC_FNs", "stride_length_mobgap", "stride_length_mocap", "cadence_mocap", "cadence_mobgap"])
+
+    # figure size settings
+    fig_scaler = 10
+    matplotlib.rcParams.update({'font.size': 2.5*fig_scaler})
+
+    for cohort in cohorts:
+        data = dataset.get_subset(cohort=cohort)
+        subjects = list({row[1] for row in dataset.group_labels if row[0] == cohort})
+        subjects = list(set(subjects) - set(subjects_to_ignore)) # remove problem subjects
+        # overwrite by uncommenting:
+        #subjects = ['234']
+        if prints:
+            print(f"Subjects for this cohort: {subjects}")
+
+        for subject in subjects:
+            start_location = os.path.join(os.getcwd(), "Dataset")
+            dat_files = get_paths_with_extension(extension="data.mat", start_location=start_location, folders_to_ignore=["Home"])
+
+            # convert mat file to a dictionary
+            print(f"Subject {subject}")
+            if prints:
+                print("Reading and converting mat file...")
+                print()
+            index = next((i for i, path in enumerate(dat_files) if f"\\{subject}\\" in path), None) # get the index of the chosen subject
+            mat = loadmat_fixed(dat_files[index])
+
+
+            for test_to_compare in all_tests:
+                # run pipeline on current test for current subject
+
+                # init variables for monitoring performance of mobgap
+                cur_sub_metrics = pd.Series(index=["cohort", "subject", "file_name", "wb_ID", "wb_TPs", "wb_FPs", "wb_FNs", "wb_TNs", "mobgap_ICs", "mocap_ICs",
+                                                   "IC_TPs", "IC_FPs", "IC_FNs", "stride_length_mobgap", "stride_length_mocap", "cadence_mocap", "cadence_mobgap"], dtype = 'object')
+
+                test = data.get_subset(Test=test_to_compare, subject_id = str(subject))[0]
+                pipeline = pipeline.safe_run(test) # pipeline now stores all the results for all wbs
+
+                # mat file shortcuts to reduce variable sizes
+                cur_mat_root = mat["data"]["TimeMeasure1"][test_to_compare]["Trial1"]
+                cur_file_name = cur_mat_root["FileName"]
+
+                # wb sizes
+                mobgap_all_wbs = len(pipeline.raw_ic_list_['ic'].index.get_level_values(0))
+                if not mobgap_all_wbs == 0:
+                    wbs_in_current_test_mobgap = (max(pipeline.raw_ic_list_['ic'].index.get_level_values(0))+1)
+                else:
+                    wbs_in_current_test_mobgap = 0
+
+                if "Stereophoto" in cur_mat_root["Standards"]:
+                    wbs_in_current_test_mocap = len(cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"])
+                    if wbs_in_current_test_mocap >= 60: # magic number caused by matlab implementation. outside scope to delve into the matlab code
+                        wbs_in_current_test_mocap = 1
+                else:
+                    wbs_in_current_test_mocap = 0
+
+                if prints:
+                    print()
+                    print("######################### " + cur_file_name + " #########################")
+
+                # add the stuff for this test to the metrics series
+                cur_sub_metrics["cohort"] = cohort
+                cur_sub_metrics["subject"] = subject
+                cur_sub_metrics["file_name"] = cur_file_name
+                cur_sub_metrics[["wb_TPs", "wb_FPs", "wb_FNs", "wb_TNs", "mobgap_ICs", "mocap_ICs", "IC_TPs", "IC_FPs", "IC_FNs"]] = 0
+
+
+                if test_to_compare in ["Test1"]:
+                    # if there are walking bouts detected in standing, we have false positives, else true negatives
+                    if wbs_in_current_test_mobgap >= 1:
+                        cur_sub_metrics["wb_FPs"] += wbs_in_current_test_mobgap
+                    else:
+                        cur_sub_metrics["wb_TNs"] += 1
+
+                    cur_sub_metrics = cur_sub_metrics.infer_objects() # automatically get dtypes
+                    all_metrics = pd.concat([all_metrics, cur_sub_metrics.to_frame().T], ignore_index=True)
+
+                else:
+                    # for all other activities, process each wb
+                    mocap_timestamp = cur_mat_root["SU"]["LowerBack"]["Timestamp"]
+                    if (wbs_in_current_test_mocap == 1) and (wbs_in_current_test_mobgap == 1):
+                        cur_sub_metrics["wb_ID"] = 1
+                        cur_sub_metrics["wb_TPs"] = 1
+                        # get the indices of all IC events detected by mobgap and mocap
+                        mocap_ic_events = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["InitialContact_Event"]
+                        mocap_event_indices = [get_closest_index(mocap_timestamp, ic_event) for ic_event in mocap_ic_events]
+                        mobgap_event_indices = pipeline.raw_ic_list_['ic'].values
+
+                        # reduce the IC events to only true positives and plot them
+                        reduced_mobgap_event_indices, mask, mobgap_mask, mocap_mask, metrics = match_closest_unique(mocap_event_indices, mobgap_event_indices, prints = prints)
+                        #plot_subject_wbs(test, mocap_event_indices, mobgap_event_indices)
+
+                        # store the IC metrics
+                        cur_sub_metrics["mobgap_ICs"] = len(mobgap_event_indices)
+                        cur_sub_metrics["mocap_ICs"] = len(mocap_event_indices)
+                        for k, v in metrics.items():
+                            cur_sub_metrics[k] = v
+
+                        # get the DMOs for the current trial
+                        cur_sub_metrics["stride_length_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["AverageStrideLength"]
+                        cur_sub_metrics["stride_length_mobgap"] = pipeline.per_wb_parameters_["stride_length_m"].values
+                        cur_sub_metrics["cadence_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["AverageCadence"]
+                        cur_sub_metrics["cadence_mobgap"] = pipeline.per_wb_parameters_["cadence_spm"].values
+                        cur_sub_metrics["walking_speed_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["AverageSpeed"]
+                        cur_sub_metrics["walking_speed_mobgap"] = pipeline.per_wb_parameters_["walking_speed_mps"].values
+
+                        cur_sub_metrics["wb_start_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["Start"]
+                        cur_sub_metrics["wb_start_mobgap"] = pipeline.per_wb_parameters_["start"].values/100
+                        cur_sub_metrics["wb_end_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["End"]
+                        cur_sub_metrics["wb_end_mobgap"] = pipeline.per_wb_parameters_["end"].values/100
+                        cur_sub_metrics["wb_duration_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"]["Duration"]
+                        cur_sub_metrics["wb_duration_mobgap"] = pipeline.per_wb_parameters_["duration_s"].values
+
+
+                        cur_sub_metrics = cur_sub_metrics.infer_objects() # automatically get dtypes
+                        all_metrics = pd.concat([all_metrics, cur_sub_metrics.to_frame().T], ignore_index=True)
+
+                    else:
+                        # more than 1 CWB means we need to loop through them and treat them like seperate tests
+                        # first, check if mobgap and mocap both detected the same number of walking bouts
+                        if wbs_in_current_test_mocap == wbs_in_current_test_mobgap:
+                            if prints:
+                                print(f"{wbs_in_current_test_mocap} mocap wbs detected!")
+
+                            for wb in range(wbs_in_current_test_mocap):
+                                if prints:
+                                    print(f"WB: {wb}")
+                                cur_sub_metrics["wb_ID"] = wb+1 # 0 indexed
+                                cur_sub_metrics["wb_TPs"] = 1
+
+                                # get the indices of all IC events detected by mobgap and mocap for this walking bout
+                                mocap_ic_events = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["InitialContact_Event"]
+                                mocap_event_indices = [get_closest_index(mocap_timestamp, ic_event) for ic_event in mocap_ic_events]
+                                mobgap_event_indices = pipeline.raw_ic_list_['ic'].loc[wb].values
+
+                                # reduce the IC events to only true positives and plot them
+                                reduced_mobgap_event_indices, mask, mobgap_mask, mocap_mask, metrics = match_closest_unique(mocap_event_indices, mobgap_event_indices)
+                                if plots:
+                                    plot_subject_wbs(test, mocap_event_indices, mobgap_event_indices)
+
+                                # store the IC metrics
+                                cur_sub_metrics["mobgap_ICs"] = len(mobgap_event_indices)
+                                cur_sub_metrics["mocap_ICs"] = len(mocap_event_indices)
+                                for k, v in metrics.items():
+                                    cur_sub_metrics[k] = v
+
+                                # get the DMOs for the current wb
+                                # helper function to safely extract mobgap parameters regardless of index type or length
+                                def get_mobgap_param(df, col, wb_idx):
+                                    if df is None or df.empty or col not in df.columns:
+                                        return np.nan
+                                    if wb_idx in df.index:
+                                        val = df.loc[wb_idx, col]
+                                    elif isinstance(wb_idx, int) and wb_idx < len(df):
+                                        val = df[col].iloc[wb_idx]
+                                    else:
+                                        return np.nan
+                                    return val.item() if hasattr(val, "item") and not hasattr(val, "__len__") else val
+
+                                cur_sub_metrics["stride_length_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["AverageStrideLength"]
+                                cur_sub_metrics["cadence_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["AverageCadence"]
+                                cur_sub_metrics["walking_speed_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["AverageSpeed"]
+                                if not cur_sub_metrics["walking_speed_mocap"]:
+                                    cur_sub_metrics["walking_speed_mocap"] = np.nan
+
+                                cur_sub_metrics["stride_length_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "stride_length_m", wb)
+                                cur_sub_metrics["cadence_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "cadence_spm", wb)
+                                cur_sub_metrics["walking_speed_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "walking_speed_mps", wb)
+
+                                # get the start, end, and duration of each walking bout
+                                cur_sub_metrics["wb_start_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["Start"]
+                                cur_sub_metrics["wb_start_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "start", wb)/100 # divide by 100 to match mocap
+                                cur_sub_metrics["wb_end_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["End"]
+                                cur_sub_metrics["wb_end_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "end", wb)/100 # divide by 100 to match mocap
+                                cur_sub_metrics["wb_duration_mocap"] = cur_mat_root["Standards"]["Stereophoto"]["ContinuousWalkingPeriod"][wb]["Duration"]
+                                cur_sub_metrics["wb_duration_mobgap"] = get_mobgap_param(pipeline.per_wb_parameters_, "duration_s", wb)
+
+                                cur_sub_metrics = cur_sub_metrics.infer_objects() # automatically get dtypes
+                                all_metrics = pd.concat([all_metrics, cur_sub_metrics.to_frame().T], ignore_index=True)
+
+                        else:
+                            if prints:
+                                print(f"{wbs_in_current_test_mocap=}")
+                                print(f"{wbs_in_current_test_mobgap=}")
+                            # mismatched wbs - report false positive/false negatives
+                            if wbs_in_current_test_mocap > wbs_in_current_test_mobgap:
+                                cur_sub_metrics["wb_FNs"] = (wbs_in_current_test_mocap - wbs_in_current_test_mobgap)
+                            else:
+                                cur_sub_metrics["wb_FPs"] = (wbs_in_current_test_mobgap - wbs_in_current_test_mocap)
+
+                            cur_sub_metrics = cur_sub_metrics.infer_objects() # automatically get dtypes
+                            all_metrics = pd.concat([all_metrics, cur_sub_metrics.to_frame().T], ignore_index=True)
+
+    # convert NAN columns to floats
+    cols_with_nan = [c for c in all_metrics.columns if all_metrics[c].isna().any()]
+
+    # convert lists to single values
+    all_metrics[cols_with_nan] = all_metrics[cols_with_nan].map(
+        lambda x: x[0] if isinstance(x, list) and len(x) > 0 else (np.nan if isinstance(x, list) else x)
+    )
+
+    all_metrics[cols_with_nan] = all_metrics[cols_with_nan].astype(float)
+
+    # format to 1dp and print
+    pd.options.display.float_format = lambda x: f"{x:.1f}"
+
+    return all_metrics
