@@ -87,7 +87,7 @@ def gsd_eval(params):
         cost_function = (missing_bout_weight*wb_FPs + missing_bout_weight*wb_FNs +
                          start_time_diff + end_time_diff + duration_diff)
     else:
-        cost_function = 1e6
+        cost_function = 1e4
     print(f"cost function = {cost_function}")
     print()
     return cost_function
@@ -104,8 +104,8 @@ space = [
     Categorical([True, False], name = 'use_original_peak_detection')
 ]
 
-number_of_iterations = 100
-number_of_random_starts = number_of_iterations // 10
+number_of_iterations = 5
+number_of_random_starts = number_of_iterations // 5 # at 10%, this didn't explore one of the parameters properly
 
 result = gp_minimize(
     gsd_eval,
@@ -121,13 +121,25 @@ best_score = result.fun
 print(f"Best parameters: {best_params}")
 print(f"Best minimum value: {best_score}")
 
-plot_convergence(result)
-plt.show()
+# 1. Set global micro-fonts prior to plotting
+plt.rcParams.update({
+    'font.size': 5,
+    'axes.labelsize': 5,
+    'axes.titlesize': 6,
+    'xtick.labelsize': 4,
+    'ytick.labelsize': 4
+})
 
 plot_evaluations(result)
+fig = plt.gcf()
+fig.set_size_inches(22, 22)
+fig.subplots_adjust(hspace=0.6, wspace=0.6)  # Increases spacing between grid items
 plt.show()
 
 plot_objective(result)
+fig = plt.gcf()
+fig.set_size_inches(22, 22)
+fig.subplots_adjust(hspace=0.6, wspace=0.6)
 plt.show()
 
 # Save to CSV
