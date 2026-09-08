@@ -104,7 +104,7 @@ space = [
     Categorical([True, False], name = 'use_original_peak_detection')
 ]
 
-number_of_iterations = 5
+number_of_iterations = 120
 number_of_random_starts = number_of_iterations // 5 # at 10%, this didn't explore one of the parameters properly
 
 result = gp_minimize(
