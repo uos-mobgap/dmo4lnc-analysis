@@ -16,26 +16,36 @@ from skopt.plots import plot_convergence, plot_evaluations, plot_objective
 import warnings
 warnings.filterwarnings("ignore", category=UserWarning)
 
-# get mobgap dataset
-paths_list = get_paths_with_extension("data.mat",
-                                      start_location=os.path.join(os.getcwd(), "Dataset"),
-                                      folders_to_ignore=["Home"])
+def assess_default_gsd():
+    pipeline = MobilisedPipelineImpaired(
+        gait_sequence_detection=GsdIluz(),
+        dmo_thresholds=multi_cohort_thresholds
+    )
 
-dataset = get_mobilised_dataset(paths_list, parent_folders_as_metadata=["cohort", "subject_id", "location", "sensor"])
-print(dataset)
+    metrics = assess_pipeline(
+        dataset,
+        pipeline,
+        cohorts,
+        subjects_to_ignore,
+        all_tests,
+        prints=False,
+    )
 
-cohorts = ["CP"] # can add "HA" or "PSP". Optimisation should be cohort specific
+    if metrics["wb_TPs"].sum() > 0: # if any walking bouts were detected
+        wb_FPs = metrics["wb_FPs"].sum()
+        wb_FNs = metrics["wb_FNs"].sum()
 
-subjects_to_ignore = ['969', '921'] # 969 was heavily gait impaired, 921 was not actually cp
+        start_time_diff = (metrics["wb_start_mocap"] - metrics["wb_start_mobgap"]).abs().sum()
+        end_time_diff = (metrics["wb_end_mocap"] - metrics["wb_end_mobgap"]).abs().sum()
+        duration_diff = (metrics["wb_duration_mocap"] - metrics["wb_end_mobgap"]).abs().sum()
 
-all_tests = ["Test" + str(i) for i in range(1, 10)]
-
-# get the HA healthy thresholds and rename them to "CP" so that we can use them to do some basic thresholding on the data
-ha_thresholds = get_mobilised_dmo_thresholds().xs("HA", level=1, drop_level=False)
-new_index = pd.MultiIndex.from_tuples([(dmo, cohort) for dmo, _ in ha_thresholds.index for cohort in cohorts], names=ha_thresholds.index.names)
-duplicated_values = pd.concat([ha_thresholds] * len(cohorts), axis=0).reset_index(drop=True)
-multi_cohort_thresholds = pd.DataFrame(duplicated_values.values, index=new_index, columns=ha_thresholds.columns)
-
+        # gp_minimize minimises this value
+        missing_bout_weight = 10
+        cost_function = (missing_bout_weight*wb_FPs + missing_bout_weight*wb_FNs +
+                         start_time_diff + end_time_diff + duration_diff)
+    else:
+        cost_function = 1e4
+    return cost_function
 
 def gsd_eval(params):
     (window_length_s, window_overlap, std_activity_threshold,
@@ -92,6 +102,32 @@ def gsd_eval(params):
     print()
     return cost_function
 
+
+# get mobgap dataset
+paths_list = get_paths_with_extension("data.mat",
+                                      start_location=os.path.join(os.getcwd(), "Dataset"),
+                                      folders_to_ignore=["Home"])
+
+dataset = get_mobilised_dataset(paths_list, parent_folders_as_metadata=["cohort", "subject_id", "location", "sensor"])
+print(dataset)
+
+cohorts = ["CP"] # can add "HA" or "PSP". Optimisation should be cohort specific
+
+subjects_to_ignore = ['969', '921'] # 969 was heavily gait impaired, 921 was not actually cp
+
+all_tests = ["Test" + str(i) for i in range(1, 10)]
+
+# get the HA healthy thresholds and rename them to "CP" so that we can use them to do some basic thresholding on the data
+ha_thresholds = get_mobilised_dmo_thresholds().xs("HA", level=1, drop_level=False)
+new_index = pd.MultiIndex.from_tuples([(dmo, cohort) for dmo, _ in ha_thresholds.index for cohort in cohorts], names=ha_thresholds.index.names)
+duplicated_values = pd.concat([ha_thresholds] * len(cohorts), axis=0).reset_index(drop=True)
+multi_cohort_thresholds = pd.DataFrame(duplicated_values.values, index=new_index, columns=ha_thresholds.columns)
+
+# first get default cost value for comparison:
+default_cost_function = assess_default_gsd()
+print(f"Default cost function = {default_cost_function}")
+print()
+
 space = [
     Real(0.5, 5.0, name='window_length_s'),
     Real(0.1, 0.9, name='window_overlap'),
@@ -104,7 +140,8 @@ space = [
     Categorical([True, False], name = 'use_original_peak_detection')
 ]
 
-number_of_iterations = 120
+# should be like 120-200
+number_of_iterations = 10
 number_of_random_starts = number_of_iterations // 5 # at 10%, this didn't explore one of the parameters properly
 
 result = gp_minimize(
