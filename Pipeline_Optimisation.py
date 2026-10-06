@@ -79,19 +79,22 @@ def assess_default_gsd():
 
 
 def gsd_eval(params):
+    prints = False
+
     (window_length_s, window_overlap, std_activity_threshold,
      mean_activity_threshold, acc_v_standing_threshold, sin_template_freq_hz,
      allowed_acc_v_change_per_window, min_gsd_duration_s, use_original_peak_detection) = params
 
-    print(f"window_length_s = {window_length_s}")
-    print(f"window_overlap = {window_overlap}")
-    print(f"std_activity_threshold = {std_activity_threshold}")
-    print(f"mean_activity_threshold = {mean_activity_threshold}")
-    print(f"acc_v_standing_threshold = {acc_v_standing_threshold}")
-    print(f"sin_template_freq_hz = {sin_template_freq_hz}")
-    print(f"allowed_acc_v_change_per_window = {allowed_acc_v_change_per_window}")
-    print(f"min_gsd_duration_s = {min_gsd_duration_s}")
-    print(f"use_original_peak_detection = {use_original_peak_detection}")
+    if prints:
+        print(f"window_length_s = {window_length_s}")
+        print(f"window_overlap = {window_overlap}")
+        print(f"std_activity_threshold = {std_activity_threshold}")
+        print(f"mean_activity_threshold = {mean_activity_threshold}")
+        print(f"acc_v_standing_threshold = {acc_v_standing_threshold}")
+        print(f"sin_template_freq_hz = {sin_template_freq_hz}")
+        print(f"allowed_acc_v_change_per_window = {allowed_acc_v_change_per_window}")
+        print(f"min_gsd_duration_s = {min_gsd_duration_s}")
+        print(f"use_original_peak_detection = {use_original_peak_detection}")
 
     pipeline = MobilisedPipelineImpaired(
         gait_sequence_detection=GsdIluz(
@@ -118,7 +121,8 @@ def gsd_eval(params):
     )
 
     mean_loso_cost = calculate_loso_cost(metrics, dataset, cohorts, subjects_to_ignore)
-    print(f"Mean LOSO CV cost function = {mean_loso_cost}\n")
+    if prints:
+        print(f"Mean LOSO CV cost function = {mean_loso_cost}\n")
     return mean_loso_cost
 
 
@@ -165,7 +169,7 @@ space = [
 ]
 
 # set to 120-200 iterations for real run
-number_of_iterations = 50
+number_of_iterations = 150
 number_of_random_starts = max(1, number_of_iterations // 5)
 
 result = gp_minimize(

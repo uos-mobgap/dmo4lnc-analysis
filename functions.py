@@ -1169,8 +1169,8 @@ def assess_pipeline(dataset, pipeline, cohorts, subjects_to_ignore, all_tests, p
             dat_files = get_paths_with_extension(extension="data.mat", start_location=start_location, folders_to_ignore=["Home"])
 
             # convert mat file to a dictionary
-            print(f"Subject {subject}")
             if prints:
+                print(f"Subject {subject}")
                 print("Reading and converting mat file...")
                 print()
             index = next((i for i, path in enumerate(dat_files) if f"\\{subject}\\" in path), None) # get the index of the chosen subject
